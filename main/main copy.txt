@@ -1,0 +1,136 @@
+#include <stdio.h>
+#include <string.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/queue.h"
+#include "driver/gpio.h"
+#include "driver/uart.h"
+#include "esp_timer.h"
+#include "esp_log.h"
+#include "soc/gpio_struct.h"  // GPIO 레지스터 접근용
+
+#define TAG "GPS_GPIO_APP"
+
+// ---------------- 핀 정의 ----------------
+#define GPIO_INPUT_PIN 7     // 인터럽트 입력 핀
+#define GPIO_POWEN_PIN 4    // GPS 전원 제어용 출력 핀
+#define UART_NUM UART_NUM_1
+#define UART_TX_PIN GPIO_NUM_5
+#define UART_RX_PIN GPIO_NUM_6
+#define UART_BUF_SIZE 1024
+
+// ---------------- 전역 큐 ----------------
+static QueueHandle_t gpio_evt_queue = NULL;
+
+// ---------------- 인터럽트 핸들러 ----------------
+static void IRAM_ATTR gpio_isr_handler(void *arg)
+{
+    static int64_t last_time = 0;
+    int64_t now = esp_timer_get_time();    // 현재 시간 (μs)
+    int64_t pulse_width = now - last_time; // 이전 인터럽트 대비 시간
+    last_time = now;
+
+    // 인터럽트 발생 시 큐에 펄스폭 전달
+    xQueueSendFromISR(gpio_evt_queue, &pulse_width, NULL);
+}
+
+// ---------------- GPIO 인터럽트 처리 태스크 ----------------
+void gpio_interrupt_task(void *arg)
+{
+    int64_t pulse_width;
+
+    while (1)
+    {
+        if (xQueueReceive(gpio_evt_queue, &pulse_width, portMAX_DELAY))
+        {
+            int level = gpio_get_level(GPIO_INPUT_PIN);
+            ESP_LOGI(TAG, "GPIO[%d] 인터럽트 발생! 레벨: %d, 펄스 폭: %lld us",
+                     GPIO_INPUT_PIN, level, pulse_width);
+        }
+    }
+}
+
+// ---------------- UART 수신 태스크 ----------------
+void uart_rx_task(void *arg)
+{
+    uint8_t *data = (uint8_t *)malloc(UART_BUF_SIZE);
+
+    while (1)
+    {
+        int len = uart_read_bytes(UART_NUM, data, UART_BUF_SIZE - 1, 100 / portTICK_PERIOD_MS);
+        if (len > 0)
+        {
+            data[len] = '\0'; // 문자열 종료
+            ESP_LOGI(TAG, "NMEA 수신 (%d bytes): %s", len, data);
+        }
+    }
+}
+
+// ---------------- GPIO 초기화 ----------------
+static void gpio_init(void)
+{
+    // 인터럽트 입력 핀 설정 (GPIO7)
+    gpio_config_t io_conf_input = {
+        .intr_type = GPIO_INTR_POSEDGE,       // 상승엣지 인터럽트
+        .mode = GPIO_MODE_INPUT,
+        .pin_bit_mask = (1ULL << GPIO_INPUT_PIN),
+        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+    };
+    gpio_config(&io_conf_input);
+
+    // 출력 핀 설정 
+    gpio_config_t io_conf_output = {
+        .intr_type = GPIO_INTR_DISABLE,
+        .mode = GPIO_MODE_OUTPUT,
+        .pin_bit_mask = (1ULL << GPIO_POWEN_PIN),
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+    };
+    gpio_config(&io_conf_output);
+
+    // 기본 상태: GPS 전원 ON
+    gpio_set_level(GPIO_POWEN_PIN, 1);
+    ESP_LOGI(TAG, "GPIO%d (GPS 전원) ON", GPIO_POWEN_PIN);
+}
+
+// ---------------- UART 초기화 ----------------
+static void uart_init(void)
+{
+    uart_config_t uart_config = {
+        .baud_rate = 9600,
+        .data_bits = UART_DATA_8_BITS,
+        .parity = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        .source_clk = UART_SCLK_DEFAULT,
+    };
+
+    ESP_ERROR_CHECK(uart_param_config(UART_NUM, &uart_config));
+    ESP_ERROR_CHECK(uart_set_pin(UART_NUM, UART_TX_PIN, UART_RX_PIN,
+                                 UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+    ESP_ERROR_CHECK(uart_driver_install(UART_NUM, UART_BUF_SIZE * 2, 0, 0, NULL, 0));
+
+    ESP_LOGI(TAG, "UART 초기화 완료 (TX=%d, RX=%d)", UART_TX_PIN, UART_RX_PIN);
+}
+
+// ---------------- 메인 함수 ----------------
+void app_main(void)
+{
+    ESP_LOGI(TAG, "ESP32-C3 GPIO + GPS 테스트 시작");
+
+    // GPIO 및 UART 초기화
+    gpio_init();
+    uart_init();
+
+    // 인터럽트 서비스 및 큐 설정
+    gpio_evt_queue = xQueueCreate(10, sizeof(int64_t));
+    gpio_install_isr_service(0);
+    gpio_isr_handler_add(GPIO_INPUT_PIN, gpio_isr_handler, (void *)GPIO_INPUT_PIN);
+
+    // FreeRTOS 태스크 생성
+    xTaskCreate(gpio_interrupt_task, "gpio_interrupt_task", 2048, NULL, 10, NULL);
+    xTaskCreate(uart_rx_task, "uart_rx_task", 4096, NULL, 5, NULL);
+
+    ESP_LOGI(TAG, "초기화 완료. 시스템 정상 동작 중!");
+}
