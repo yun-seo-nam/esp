@@ -18,7 +18,7 @@
 #define PIN_CHR_STATE           6   
 #define PIN_UART_TX             9   // GPS UART TX
 #define PIN_UART_RX             8   // GPS UART TX
-#define PIN_PPS_INPUT           10   // GPS pulse per seconds
+#define PIN_PPS_INPUT           10  // GPS pulse per seconds
 
 // 임시
 #define PIN_DEBUG_RX            20  // 디버그 UART RX 
