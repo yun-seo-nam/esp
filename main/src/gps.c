@@ -13,9 +13,6 @@
 #include <sys/time.h>   
 #include <stdlib.h>     
 
-// ⭐️ FIX 1: 'timegm'의 extern 선언을 삭제합니다.
-// extern time_t timegm(struct tm *tm); 
-
 static bool print_gps_info(char *gga, char *rmc, char *gsa);
 static void set_korea_timezone(void); 
 
@@ -40,9 +37,8 @@ static bool g_has_gga = false;
 static bool g_has_rmc = false;
 static bool g_has_gsa = false;
 
-/* ============================================================
- * Private 함수
- * ============================================================ */
+// ============================================================
+
 
 static esp_err_t init_gps_uart(void)
 {
@@ -103,6 +99,8 @@ static void parse_nmea_sentence(const char *line)
 
     if (strstr(line, "$GNGGA") || strstr(line, "$GPGGA")) {
         strncpy(g_gga_line, line, sizeof(g_gga_line) - 1);
+
+
         g_gga_line[sizeof(g_gga_line) - 1] = '\0'; 
         g_has_gga = true; 
         check_for_batch_complete = true; 
