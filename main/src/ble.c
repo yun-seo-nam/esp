@@ -19,9 +19,6 @@ esp_err_t esp_nimble_hci_and_controller_init(void);
 
 static const char *TAG = "BLE_NIMBLE";
 
-/* ===================================
- * 상태 변수
- * =================================== */
 static int64_t  s_offset_us = 0;
 static char     s_gps_str[64] = "Waiting for GPS...";
 static uint16_t s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
@@ -44,15 +41,17 @@ static const ble_uuid128_t UUID_CHAR_LOGS =
                      0x00,0x10,0x00,0x03,0xAA,0x00,0x00,0x00);
 
 /* ===================================
- * GATT 접근 콜백
+ * GATT 접근 콜백 함수
  * =================================== */
-static int read_offset_cb(uint16_t conn_handle, uint16_t attr_handle,
+// offset 값 전송
+ static int read_offset_cb(uint16_t conn_handle, uint16_t attr_handle,
                           struct ble_gatt_access_ctxt *ctxt, void *arg)
 {
     return os_mbuf_append(ctxt->om, &s_offset_us, sizeof(s_offset_us)) == 0
            ? 0 : BLE_ATT_ERR_UNLIKELY;
 }
 
+// gps 문자열 전송
 static int read_gps_cb(uint16_t conn_handle, uint16_t attr_handle,
                        struct ble_gatt_access_ctxt *ctxt, void *arg)
 {
@@ -61,9 +60,6 @@ static int read_gps_cb(uint16_t conn_handle, uint16_t attr_handle,
            ? 0 : BLE_ATT_ERR_UNLIKELY;
 }
 
-/* ===================================
- * GATT 서비스
- * =================================== */
 static const struct ble_gatt_svc_def gatt_svcs[] = {
     {
         .type = BLE_GATT_SVC_TYPE_PRIMARY,

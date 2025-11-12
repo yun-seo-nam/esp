@@ -1,6 +1,6 @@
 #pragma once
 
-#include "esp_system.h" // esp_err_t 타입을 위해 필요합니다.
+#include "esp_system.h"
 
 /**
  * @brief Trigger/PPS 동기화 모듈 초기화
@@ -11,4 +11,5 @@
  * 4. 시간 차이 계산을 위한 별도 태스크(timer_logic_task) 생성
  * * @return ESP_OK (성공), ESP_FAIL (실패)
  */
+
 esp_err_t trigger_sync_init(void);

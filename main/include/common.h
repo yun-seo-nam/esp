@@ -16,8 +16,10 @@
 #define PIN_GPS_POWER           4   // GPS 전원 제어
 #define PIN_LED                 5   
 #define PIN_CHR_STATE           6   
+
+#define PIN_UART_RX             8   // GPS UART RX
 #define PIN_UART_TX             9   // GPS UART TX
-#define PIN_UART_RX             8   // GPS UART TX
+
 #define PIN_PPS_INPUT           10  // GPS pulse per seconds
 
 // 임시
@@ -35,18 +37,14 @@
 #define TAG_BATTERY     "BATTERY"
 #define TAG_SYSTEM      "SYS_MANAGER"
 #define TAG_COMM        "COMM_TASK"
-#define TAG_BLE "BLE"
+#define TAG_BLE         "BLE"
 
-/* ============================================================
- * 유틸리티 매크로
- * ============================================================ */
+// macro
 #define UNUSED(x)           (void)(x)
 #define GPIO_SET_LOW(pin)   gpio_set_level(pin, 0)
 #define GPIO_SET_HIGH(pin)  gpio_set_level(pin, 1)
 
-/* ============================================================
- * 시스템 상태 구조체
- * ============================================================ */
+// state_아직 보류
 typedef struct {
     float battery_voltage;   // 현재 배터리 전압(V)
     bool battery_charging;   // 충전 중 여부
@@ -58,9 +56,6 @@ typedef struct {
 
 extern system_status_t system_status;
 
-/* ============================================================
- * GPIO 초기화 함수
- * ============================================================ */
 void board_gpio_init(void);
 
 
