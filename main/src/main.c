@@ -2,18 +2,16 @@
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "esp_log.h" // ⭐️ ESP_LOG* 매크로를 위해 추가
+#include "esp_log.h"
 
-#include "common.h" 
+#include "common.h"
 #include "led.h"
-#include "monitoring.h" 
+#include "monitoring.h"
 #include "gps.h"
-#include "trigger.h"    
-#include "ble_nimble.h" // ⭐️ 'ble_nimble.h'
+#include "trigger.h"
+#include "ble.h"
 
-// ⭐️ 네가 준 'gap.c' 예제 코드에 이게 있었어.
-// ⭐️ 'common.h'에 'system_status_t'가 정의되어 있어야 해.
-system_status_t system_status; 
+system_status_t system_status;
 
 void app_main(void)
 {
@@ -21,25 +19,32 @@ void app_main(void)
     memset(&system_status, 0, sizeof(system_status_t));
 
     // LED 태스크 시작
-    if (led_task_init() != ESP_OK) {
+    if (led_task_init() != ESP_OK)
+    {
         ESP_LOGE(TAG_APP, "Failed to start LED task!");
     }
 
-    // ⭐️ BLE 초기화 (다른 태스크보다 먼저)
-    if (ble_nimble_stack_init() != ESP_OK) {
-        ESP_LOGE(TAG_APP, "Failed to initialize NimBLE stack!");
+    if (ble_nimble_init() != ESP_OK) {
+        ESP_LOGE("APP", "BLE init failed");
+        return;
     }
 
-    if (trigger_sync_init() != ESP_OK) {
+    ble_set_offset_value(987654);
+    ble_set_gps_value("37.5665,126.9780,2025-11-12T09:00:00Z");
+
+    if (trigger_sync_init() != ESP_OK)
+    {
         ESP_LOGE(TAG_APP, "Failed to start Trigger Sync test module!");
     }
 
-    if (gps_task_init() != ESP_OK) {
+    if (gps_task_init() != ESP_OK)
+    {
         ESP_LOGE(TAG_APP, "Failed to start GPS task!");
     }
-    
+
     // 4. 시스템 모니터링 태스크 시작
-    if (monitoring_task_init() != ESP_OK) {
+    if (monitoring_task_init() != ESP_OK)
+    {
         ESP_LOGE(TAG_APP, "Failed to start Monitoring task!");
     }
 

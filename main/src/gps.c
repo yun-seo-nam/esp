@@ -1,4 +1,5 @@
 #include "gps.h"        
+#include "ble.h"
 #include "common.h"     
 
 #include "freertos/FreeRTOS.h"
@@ -147,14 +148,18 @@ static double nmea_to_decimal(double nmea_val)
 
 static bool print_gps_info(char *gga, char *rmc, char *gsa)
 {
+    // strtok_r을 위한 세이브 포인터 변수
+    char *rmc_saveptr, *gga_saveptr, *gsa_saveptr;
+
     char *token;
     char *rmc_fields[14] = {0}; 
     int i = 0;
 
-    token = strtok(rmc, ","); 
+    // 1. RMC 파싱 (strtok_r 사용)
+    token = strtok_r(rmc, ",", &rmc_saveptr); 
     while(token != NULL && i < 14) {
         rmc_fields[i++] = token;
-        token = strtok(NULL, ",");
+        token = strtok_r(NULL, ",", &rmc_saveptr);
     }
 
     char rmc_status = 'V';
@@ -162,10 +167,16 @@ static bool print_gps_info(char *gga, char *rmc, char *gsa)
         rmc_status = rmc_fields[2][0];
     }
     
+    // 2. RMC 상태 ('V' = No Fix) 확인
     if (rmc_status == 'V') {
         ESP_LOGI(TAG_GPS, "-------------------------------");
         ESP_LOGI(TAG_GPS, "[NO FIX] Waiting for satellites...");
         ESP_LOGI(TAG_GPS, "-------------------------------");
+        
+        // ⭐️ [로직 버그 수정 1] ⭐️
+        // GPS가 Fix되지 않았을 때도 BLE 값은 업데이트 해주는 게 좋습니다.
+        ble_set_gps_value("[NO FIX] Waiting...");
+
         return false; 
     }
 
@@ -176,12 +187,13 @@ static bool print_gps_info(char *gga, char *rmc, char *gsa)
         return false; 
     }
 
+    // 3. GGA 파싱 (strtok_r 사용)
     char *gga_fields[15] = {0};
     i = 0;
-    token = strtok(gga, ","); 
+    token = strtok_r(gga, ",", &gga_saveptr); 
     while(token != NULL && i < 15) {
         gga_fields[i++] = token;
-        token = strtok(NULL, ",");
+        token = strtok_r(NULL, ",", &gga_saveptr);
     }
     
     int fix_quality   = (gga_fields[6]) ? atoi(gga_fields[6]) : 0;
@@ -189,21 +201,22 @@ static bool print_gps_info(char *gga, char *rmc, char *gsa)
     double hdop       = (gga_fields[8]) ? atof(gga_fields[8]) : 0;
     double altitude   = (gga_fields[9]) ? atof(gga_fields[9]) : 0;
     double lat_nmea = (gga_fields[2]) ? atof(gga_fields[2]) : 0;
-    char lat_ns     = (gga_fields[3] && gga_fields[3][0]) ? gga_fields[3][0] : ' ';
+    char lat_ns       = (gga_fields[3] && gga_fields[3][0]) ? gga_fields[3][0] : ' ';
     double lon_nmea = (gga_fields[4]) ? atof(gga_fields[4]) : 0;
-    char lon_ew     = (gga_fields[5] && gga_fields[5][0]) ? gga_fields[5][0] : ' ';
+    char lon_ew       = (gga_fields[5] && gga_fields[5][0]) ? gga_fields[5][0] : ' ';
 
+    // 4. GSA 파싱 (strtok_r 사용)
     char *gsa_fields[20] = {0}; 
     i = 0;
-    token = strtok(gsa, ","); 
+    token = strtok_r(gsa, ",", &gsa_saveptr); 
     while(token != NULL && i < 20) {
         gsa_fields[i++] = token;
-        token = strtok(NULL, ",");
+        token = strtok_r(NULL, ",", &gsa_saveptr);
     }
 
     int fix_type = (gsa_fields[2]) ? atoi(gsa_fields[2]) : 1;
 
-    // --- 1. KST 시간/날짜 변환 ---
+    // --- 5. KST 시간/날짜 변환 ---
     struct tm t = {0};
     int time_int = (int)rmc_time_utc;
     int date_int = (int)rmc_date_utc;
@@ -211,47 +224,52 @@ static bool print_gps_info(char *gga, char *rmc, char *gsa)
     t.tm_hour = (time_int / 10000);
     t.tm_min  = (time_int / 100) % 100;
     t.tm_sec  = time_int % 100;
-    
     t.tm_mday = (date_int / 10000);
     t.tm_mon  = ((date_int / 100) % 100) - 1; 
-    t.tm_year = (date_int % 100) + 100;     
+    t.tm_year = (date_int % 100) + 100; 
     
-    // ⭐️ FIX 2: mktime()을 사용하고 KST 오프셋(9시간 = 32400초)을 수동으로 더함
     time_t utc_time = mktime(&t) + (9 * 3600); 
-    
     struct tm tm_kst;
     localtime_r(&utc_time, &tm_kst); 
     
     char kst_time_str[20];
     strftime(kst_time_str, sizeof(kst_time_str), "%Y-%m-%d %H:%M:%S", &tm_kst);
     
-    // --- 2. 좌표 변환 ---
+    // --- 6. 좌표 변환 ---
     double latitude_decimal = nmea_to_decimal(lat_nmea);
     double longitude_decimal = nmea_to_decimal(lon_nmea);
     if (lat_ns == 'S') latitude_decimal *= -1.0;
     if (lon_ew == 'W') longitude_decimal *= -1.0;
 
-    // --- 3. Fix Type 문자열 변환 ---
+    // --- 7. Fix Type 문자열 변환 ---
     const char *fix_str = "Unknown";
     if (fix_type == 1) fix_str = "No Fix";
     else if (fix_type == 2) fix_str = "2D Fix";
     else if (fix_type == 3) fix_str = "3D Fix";
     
-    // --- 4. 최종 출력 ---
+    // --- 8. 최종 로그 출력 ---
     ESP_LOGI(TAG_GPS, "-------------------------------");
     ESP_LOGI(TAG_GPS, "[GPS FIX]");
     ESP_LOGI(TAG_GPS, "Time (KST): %s", kst_time_str);
-    ESP_LOGI(TAG_GPS, "Latitude  : %f° %c", latitude_decimal, lat_ns);
+    ESP_LOGI(TAG_GPS, "Latitude  : %f° %c", latitude_decimal, lat_ns);
     ESP_LOGI(TAG_GPS, "Longitude : %f° %c", longitude_decimal, lon_ew);
-    ESP_LOGI(TAG_GPS, "Altitude  : %.1f m", altitude);
+    ESP_LOGI(TAG_GPS, "Altitude  : %.1f m", altitude);
     ESP_LOGI(TAG_GPS, "Satellites: %d", satellites);
-    ESP_LOGI(TAG_GPS, "HDOP      : %.2f", hdop);
-    ESP_LOGI(TAG_GPS, "Fix Type  : %s (GGA_Fix:%d, GSA_Fix:%d)", fix_str, fix_quality, fix_type);
+    ESP_LOGI(TAG_GPS, "HDOP      : %.2f", hdop);
+    ESP_LOGI(TAG_GPS, "Fix Type  : %s (GGA_Fix:%d, GSA_Fix:%d)", fix_str, fix_quality, fix_type);
     ESP_LOGI(TAG_GPS, "-------------------------------");
+
+    // ⭐️ [로직 버그 수정 2] ⭐️
+    // 파싱한 데이터를 BLE 변수에 업데이트합니다.
+    char gps_buf[64];
+    snprintf(gps_buf, sizeof(gps_buf), "%.5f,%.5f (%s)", 
+             latitude_decimal, longitude_decimal, kst_time_str);
+    
+    // 이 함수를 호출해야 BLE로 값이 넘어갑니다!
+    ble_set_gps_value(gps_buf);
 
     return true; 
 }
-
 
 static void gps_read_task(void *arg)
 {
