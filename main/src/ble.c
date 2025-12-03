@@ -60,24 +60,42 @@ static int read_gps_cb(uint16_t conn_handle, uint16_t attr_handle,
            ? 0 : BLE_ATT_ERR_UNLIKELY;
 }
 
+/* ===================================
+ * 수정된 GATT 서비스 정의
+ * =================================== */
+
+// Notify용 빈 콜백 (안전장치)
+static int notify_dummy_cb(uint16_t conn_handle, uint16_t attr_handle,
+                           struct ble_gatt_access_ctxt *ctxt, void *arg) {
+    return 0;
+}
+
 static const struct ble_gatt_svc_def gatt_svcs[] = {
     {
         .type = BLE_GATT_SVC_TYPE_PRIMARY,
-        .uuid = &UUID_SVC_TRIGGER.u,
+        // [중요] UUID 포인터를 명시적으로 캐스팅
+        .uuid = (ble_uuid_t *)&UUID_SVC_TRIGGER, 
         .characteristics = (struct ble_gatt_chr_def[]) {
-            { .uuid=&UUID_CHAR_OFFSET.u, .access_cb=read_offset_cb, .flags=BLE_GATT_CHR_F_READ },
-            { .uuid=&UUID_CHAR_GPS.u,    .access_cb=read_gps_cb,    .flags=BLE_GATT_CHR_F_READ },
-            { .uuid=&UUID_CHAR_LOGS.u,   .access_cb=NULL, .flags=BLE_GATT_CHR_F_NOTIFY,
-              .val_handle=&s_logs_val_handle,
-              .descriptors=(struct ble_gatt_dsc_def[]){
-                  { .uuid=BLE_UUID16_DECLARE(BLE_GATT_DSC_CLT_CFG_UUID16),
-                    .att_flags=BLE_ATT_F_READ|BLE_ATT_F_WRITE,
-                    .access_cb=NULL }, {0}
-              }},
-            {0}
+            {
+                .uuid = (ble_uuid_t *)&UUID_CHAR_OFFSET,
+                .access_cb = read_offset_cb,
+                .flags = BLE_GATT_CHR_F_READ
+            },
+            {
+                .uuid = (ble_uuid_t *)&UUID_CHAR_GPS,
+                .access_cb = read_gps_cb,
+                .flags = BLE_GATT_CHR_F_READ
+            },
+            {
+                .uuid = (ble_uuid_t *)&UUID_CHAR_LOGS,
+                .access_cb = notify_dummy_cb, // NULL 대신 빈 콜백 사용 (에러 방지)
+                .flags = BLE_GATT_CHR_F_NOTIFY, 
+                .val_handle = &s_logs_val_handle
+            },
+            {0} // 특성 목록 끝
         },
     },
-    {0}
+    {0} // 서비스 목록 끝
 };
 
 /* ===================================
@@ -139,11 +157,9 @@ static void start_advertising(void)
     ESP_LOGI(TAG, "Advertising as '%s'", name);
 }
 
-/* ===================================
- * BLE 동기화 콜백
- * =================================== */
 static void ble_on_sync(void)
 {
+    int rc;
     uint8_t addr_type;
     uint8_t addr_val[6] = {0};
 
@@ -152,11 +168,27 @@ static void ble_on_sync(void)
     ESP_LOGI(TAG, "Addr: %02X:%02X:%02X:%02X:%02X:%02X",
              addr_val[5],addr_val[4],addr_val[3],addr_val[2],addr_val[1],addr_val[0]);
 
-    ble_svc_gap_device_name_set("nimble");
+    ble_svc_gap_device_name_set("nimble_fixed"); // 이름도 살짝 바꿔서 캐시 갱신 유도
+    
     ble_svc_gap_init();
     ble_svc_gatt_init();
-    ble_gatts_count_cfg(gatt_svcs);
-    ble_gatts_add_svcs(gatt_svcs);
+
+    // 1. 서비스 등록
+    rc = ble_gatts_count_cfg(gatt_svcs);
+    if (rc != 0) ESP_LOGW(TAG, "Service count error: %d", rc);
+
+    rc = ble_gatts_add_svcs(gatt_svcs);
+    if (rc != 0) {
+        ESP_LOGE(TAG, "Service add failed: %d", rc);
+        return;
+    } 
+    ESP_LOGI(TAG, "Service added successfully!");
+
+    rc = ble_gatts_start();
+    if (rc != 0) {
+        ESP_LOGE(TAG, "Service start failed: %d", rc);
+        return;
+    }
 
     start_advertising();
 }
@@ -194,13 +226,8 @@ esp_err_t ble_nimble_init(void)
     }
     ESP_ERROR_CHECK(ret);
 
-    // 🔹 여기서 HCI + 컨트롤러 초기화  <-- 이 부분이 문제입니다.
-    // ESP_ERROR_CHECK(esp_nimble_hci_and_controller_init()); // <-- 이 줄을 주석 처리하거나 삭제하세요!
-
-    // 🔹 NimBLE 호스트 초기화 (이 함수가 컨트롤러 초기화까지 모두 수행합니다)
     ESP_ERROR_CHECK(nimble_port_init());
 
-    // 🔹 호스트 task 실행
     nimble_port_freertos_init(ble_host_task);
 
     ESP_LOGI("BLE", "NimBLE initialized successfully");

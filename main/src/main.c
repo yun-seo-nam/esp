@@ -24,10 +24,10 @@ void app_main(void)
         ESP_LOGE(TAG_APP, "Failed to start LED task!");
     }
 
-    //if (ble_nimble_init() != ESP_OK) {
-    //    ESP_LOGE("APP", "BLE init failed");
-    //    return;
-    //}
+    if (ble_nimble_init() != ESP_OK) {
+       ESP_LOGE("APP", "BLE init failed");
+       return;
+    }
 
     //ble_set_offset_value(987654);
     //ble_set_gps_value("37.5665,126.9780,2025-11-12T09:00:00Z");
